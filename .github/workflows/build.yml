@@ -1,0 +1,642 @@
+name: Build Xiaozhi Huy Vector C3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Huy Vector ESP32-C3
+    runs-on: ubuntu-latest
+
+    container:
+      image: espressif/idf:v6.1
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ============================================================
+      # 2. INITIALIZE ESP-IDF
+      # ============================================================
+      - name: Initialize ESP-IDF
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "INITIALIZE ESP-IDF"
+          echo "========================================"
+
+          echo "IDF_PATH=$IDF_PATH"
+
+          if [ ! -f "$IDF_PATH/export.sh" ]; then
+            echo "ERROR: ESP-IDF export.sh tidak ditemukan."
+            exit 1
+          fi
+
+          source "$IDF_PATH/export.sh"
+
+          echo
+          echo "ESP-IDF:"
+          which idf.py
+          idf.py --version
+
+          echo
+          echo "Python:"
+          python --version
+
+      # ============================================================
+      # 3. SHOW REPOSITORY
+      # ============================================================
+      - name: Show repository
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "REPOSITORY"
+          echo "========================================"
+
+          pwd
+          ls -lah
+
+      # ============================================================
+      # 4. FIND FINAL ZIP
+      # ============================================================
+      - name: Find Xiaozhi ZIP
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "FIND XIAOZHI ZIP"
+          echo "========================================"
+
+          ZIP_FILE=$(find . \
+            -maxdepth 3 \
+            -type f \
+            -name "xiaozhi-huy-vector-c3-final-v2.zip" \
+            -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: xiaozhi-huy-vector-c3-final-v2.zip tidak ditemukan."
+
+            echo
+            echo "ZIP yang tersedia:"
+            find . \
+              -maxdepth 4 \
+              -type f \
+              -name "*.zip" \
+              -print
+
+            exit 1
+          fi
+
+          echo
+          echo "ZIP ditemukan:"
+          echo "$ZIP_FILE"
+
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # 5. EXTRACT SINGLE ZIP
+      # ============================================================
+      - name: Extract final ZIP
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "EXTRACT FINAL ZIP"
+          echo "========================================"
+
+          rm -rf NeoBuild
+          mkdir -p NeoBuild
+
+          unzip -q "$ZIP_FILE" -d NeoBuild
+
+          echo
+          echo "Extract selesai."
+
+          echo
+          echo "Struktur awal:"
+          find NeoBuild -maxdepth 3 -type f | head -100
+
+      # ============================================================
+      # 6. CHECK FOR NESTED ZIP
+      # ============================================================
+      - name: Check nested ZIP
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "CHECK NESTED ZIP"
+          echo "========================================"
+
+          NESTED=$(find NeoBuild \
+            -type f \
+            -name "*.zip" \
+            -print)
+
+          if [ -n "$NESTED" ]; then
+            echo "ERROR: ZIP di dalam ZIP ditemukan:"
+            echo "$NESTED"
+            exit 1
+          fi
+
+          echo "OK: Tidak ada ZIP bersarang."
+
+      # ============================================================
+      # 7. DETECT XIAOZHI ROOT
+      # ============================================================
+      - name: Detect Xiaozhi root
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "DETECT XIAOZHI ROOT"
+          echo "========================================"
+
+          ROOT=""
+
+          if [ -f "NeoBuild/CMakeLists.txt" ] && \
+             [ -d "NeoBuild/main" ]; then
+
+            ROOT="NeoBuild"
+
+          else
+
+            while IFS= read -r cmake; do
+
+              DIR=$(dirname "$cmake")
+
+              if [ -d "$DIR/main" ]; then
+                ROOT="$DIR"
+                break
+              fi
+
+            done < <(
+              find NeoBuild \
+                -mindepth 1 \
+                -maxdepth 5 \
+                -type f \
+                -name "CMakeLists.txt"
+            )
+
+          fi
+
+          if [ -z "$ROOT" ]; then
+            echo "ERROR: Root Xiaozhi tidak ditemukan."
+
+            echo
+            echo "Direktori:"
+            find NeoBuild \
+              -maxdepth 5 \
+              -type d \
+              | sort
+
+            exit 1
+          fi
+
+          echo
+          echo "XIAOZHI ROOT:"
+          echo "$ROOT"
+
+          echo "XIAOZHI_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      # ============================================================
+      # 8. VERIFY SOURCE
+      # ============================================================
+      - name: Verify Xiaozhi source
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "VERIFY XIAOZHI SOURCE"
+          echo "========================================"
+
+          echo
+          echo "--- ROOT ---"
+          pwd
+
+          echo
+          echo "--- FILES ---"
+          ls -lah
+
+          echo
+          echo "--- MAIN ---"
+          ls -lah main
+
+          echo
+          echo "--- BUILD SCRIPT ---"
+          python scripts/build.py --help
+
+      # ============================================================
+      # 9. VERIFY HUY VECTOR BOARD
+      # ============================================================
+      - name: Verify Huy Vector board
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "VERIFY HUY VECTOR C3"
+          echo "========================================"
+
+          echo
+          echo "--- BOARD FILES ---"
+
+          if [ ! -d "main/boards/huy-vector/c3" ]; then
+            echo "ERROR: main/boards/huy-vector/c3 tidak ditemukan."
+            exit 1
+          fi
+
+          find main/boards/huy-vector/c3 \
+            -maxdepth 1 \
+            -type f \
+            -print
+
+          echo
+          echo "--- BOARD SYMBOL ---"
+
+          grep -n \
+            "BOARD_TYPE_HUY_VECTOR_C3" \
+            main/Kconfig.projbuild
+
+          echo
+          echo "--- BOARD CMAKE ---"
+
+          grep -n \
+            -A6 \
+            -B2 \
+            "BOARD_TYPE_HUY_VECTOR_C3" \
+            main/CMakeLists.txt
+
+          echo
+          echo "--- CONFIG.H ---"
+
+          cat main/boards/huy-vector/c3/config.h
+
+          echo
+          echo "--- CONFIG.JSON ---"
+
+          cat main/boards/huy-vector/c3/config.json
+
+      # ============================================================
+      # 10. VERIFY PIN MAPPING
+      # ============================================================
+      - name: Verify pin mapping
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "VERIFY PIN MAPPING"
+          echo "========================================"
+
+          echo
+          echo "Expected:"
+          echo "INMP441 SD   = GPIO8"
+          echo "I2S BCLK     = GPIO1"
+          echo "I2S WS       = GPIO2"
+          echo "MAX98357 DIN = GPIO3"
+          echo "PTT BUTTON   = GPIO4"
+          echo "OLED SDA     = GPIO21"
+          echo "OLED SCL     = GPIO20"
+
+          echo
+          echo "--- ACTUAL CONFIG ---"
+
+          grep -nE \
+            "GPIO_NUM_1|GPIO_NUM_2|GPIO_NUM_3|GPIO_NUM_4|GPIO_NUM_8|GPIO_NUM_20|GPIO_NUM_21" \
+            main/boards/huy-vector/c3/config.h
+
+      # ============================================================
+      # 11. VERIFY NO AUTO-LISTEN
+      # ============================================================
+      - name: Check old auto-listen code
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "CHECK AUTO-LISTEN"
+          echo "========================================"
+
+          if grep -Rni \
+            --exclude-dir=.git \
+            --exclude-dir=build \
+            -E \
+            "AUTO-LISTEN TEST|auto_listen_test_started_" \
+            main; then
+
+            echo
+            echo "ERROR: AUTO-LISTEN TEST masih ditemukan."
+            exit 1
+          fi
+
+          echo
+          echo "OK:"
+          echo "Tidak ada AUTO-LISTEN TEST."
+
+      # ============================================================
+      # 12. VERIFY ESP-IDF
+      # ============================================================
+      - name: Prepare ESP-IDF
+        run: |
+          set -e
+
+          source "$IDF_PATH/export.sh"
+
+          echo "========================================"
+          echo "ESP-IDF READY"
+          echo "========================================"
+
+          echo
+          echo "IDF_PATH:"
+          echo "$IDF_PATH"
+
+          echo
+          echo "idf.py:"
+          which idf.py
+
+          echo
+          echo "Version:"
+          idf.py --version
+
+      # ============================================================
+      # 13. CLEAN OLD BUILD
+      # ============================================================
+      - name: Clean build
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "CLEAN BUILD"
+          echo "========================================"
+
+          rm -rf build
+          rm -f sdkconfig
+          rm -f sdkconfig.old
+
+          echo "Clean selesai."
+
+      # ============================================================
+      # 14. BUILD USING XIAOZHI BUILD SCRIPT
+      #
+      # IMPORTANT:
+      # This build.py version uses:
+      #
+      #   python scripts/build.py [board]
+      #
+      # NOT:
+      #
+      #   --board
+      #   --target
+      #   config
+      #   build
+      # ============================================================
+      - name: Build Huy Vector C3
+        run: |
+          set -e
+
+          source "$IDF_PATH/export.sh"
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "BUILD HUY VECTOR C3"
+          echo "========================================"
+
+          echo
+          echo "ESP-IDF:"
+          idf.py --version
+
+          echo
+          echo "Build command:"
+          echo "python scripts/build.py huy-vector/c3"
+
+          echo
+
+          python scripts/build.py huy-vector/c3
+
+      # ============================================================
+      # 15. INSPECT BUILD
+      # ============================================================
+      - name: Inspect build output
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "BUILD OUTPUT"
+          echo "========================================"
+
+          if [ ! -d "build" ]; then
+            echo "ERROR: folder build tidak ditemukan."
+            exit 1
+          fi
+
+          echo
+          echo "--- BUILD DIRECTORY ---"
+          ls -lah build
+
+          echo
+          echo "--- BIN FILES ---"
+
+          find build \
+            -type f \
+            -name "*.bin" \
+            -print
+
+          echo
+          echo "--- ELF FILES ---"
+
+          find build \
+            -type f \
+            -name "*.elf" \
+            -print
+
+      # ============================================================
+      # 16. VERIFY FIRMWARE EXISTS
+      # ============================================================
+      - name: Verify firmware
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "VERIFY FIRMWARE"
+          echo "========================================"
+
+          BIN_COUNT=$(find build \
+            -type f \
+            -name "*.bin" \
+            | wc -l)
+
+          echo "BIN count = $BIN_COUNT"
+
+          if [ "$BIN_COUNT" -eq 0 ]; then
+            echo "ERROR: Tidak ada firmware .bin."
+            exit 1
+          fi
+
+          echo
+          echo "Firmware ditemukan:"
+          find build \
+            -type f \
+            -name "*.bin" \
+            -exec ls -lh {} \;
+
+      # ============================================================
+      # 17. COLLECT FIRMWARE
+      # ============================================================
+      - name: Collect firmware
+        run: |
+          set -e
+
+          cd "$XIAOZHI_ROOT"
+
+          echo "========================================"
+          echo "COLLECT FIRMWARE"
+          echo "========================================"
+
+          rm -rf "$GITHUB_WORKSPACE/firmware"
+
+          mkdir -p "$GITHUB_WORKSPACE/firmware"
+
+          echo
+          echo "Copy BIN..."
+
+          find build \
+            -type f \
+            -name "*.bin" \
+            -exec cp --parents {} \
+            "$GITHUB_WORKSPACE/firmware/" \;
+
+          echo
+          echo "Copy ELF..."
+
+          find build \
+            -type f \
+            -name "*.elf" \
+            -exec cp --parents {} \
+            "$GITHUB_WORKSPACE/firmware/" \;
+
+          echo
+          echo "Copy sdkconfig..."
+
+          if [ -f sdkconfig ]; then
+            cp sdkconfig \
+              "$GITHUB_WORKSPACE/firmware/sdkconfig"
+          fi
+
+          echo
+          echo "Copy flash_args..."
+
+          if [ -f build/flash_args ]; then
+            cp build/flash_args \
+              "$GITHUB_WORKSPACE/firmware/flash_args.txt"
+          fi
+
+          echo
+          echo "Copy flasher_args.json..."
+
+          if [ -f build/flasher_args.json ]; then
+            cp build/flasher_args.json \
+              "$GITHUB_WORKSPACE/firmware/flasher_args.json"
+          fi
+
+          echo
+          echo "Collected files:"
+
+          find "$GITHUB_WORKSPACE/firmware" \
+            -type f \
+            -print
+
+      # ============================================================
+      # 18. GENERATE SHA256
+      # ============================================================
+      - name: Generate SHA256
+        run: |
+          set -e
+
+          cd "$GITHUB_WORKSPACE/firmware"
+
+          echo "========================================"
+          echo "SHA256"
+          echo "========================================"
+
+          rm -f SHA256SUMS.txt
+
+          find . \
+            -type f \
+            ! -name "SHA256SUMS.txt" \
+            -print0 \
+            | sort -z \
+            | xargs -0 sha256sum \
+            > SHA256SUMS.txt
+
+          echo
+          cat SHA256SUMS.txt
+
+      # ============================================================
+      # 19. PACKAGE FIRMWARE
+      # ============================================================
+      - name: Package firmware
+        run: |
+          set -e
+
+          cd "$GITHUB_WORKSPACE"
+
+          echo "========================================"
+          echo "PACKAGE FIRMWARE"
+          echo "========================================"
+
+          rm -f xiaozhi-huy-vector-c3-firmware-v2.zip
+
+          zip -qr \
+            xiaozhi-huy-vector-c3-firmware-v2.zip \
+            firmware
+
+          echo
+          echo "Firmware ZIP:"
+          ls -lh \
+            xiaozhi-huy-vector-c3-firmware-v2.zip
+
+          echo
+          echo "Firmware ZIP SHA256:"
+          sha256sum \
+            xiaozhi-huy-vector-c3-firmware-v2.zip
+
+      # ============================================================
+      # 20. UPLOAD ARTIFACT
+      # ============================================================
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaozhi-huy-vector-c3-firmware-v2
+          path: |
+            firmware/
+            xiaozhi-huy-vector-c3-firmware-v2.zip
+          if-no-files-found: error
+          retention-days: 30
